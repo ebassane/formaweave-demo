@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8">
+<title>FORMAWEAVE — demo jedra (wasm)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; padding: 1rem; max-width: 1200px; margin-inline: auto; }
+  h1 { font-size: 1.15rem; } h1 small { font-weight: normal; opacity: .7; }
+  .cols { display: flex; gap: 1rem; flex-wrap: wrap; }
+  fieldset { border: 1px solid #8884; border-radius: 8px; min-width: 260px; }
+  label { display: grid; grid-template-columns: 11rem 1fr 4rem; gap: .5rem; align-items: center; font-size: .85rem; margin: .25rem 0; }
+  svg { background: #8881; border-radius: 8px; }
+  .stat { font-size: .85rem; margin-top: .4rem; }
+  .cop label { grid-template-columns: 2.5rem 5rem; }
+  table { font-size: .8rem; border-collapse: collapse; margin-top: .4rem; }
+  th, td { border: 1px solid #8884; padding: .15rem .45rem; text-align: right; }
+  td:nth-child(2) { text-align: left; }
+  .warn { font-size: .75rem; opacity: .75; max-width: 60ch; }
+  .err { color: #c00; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>FORMAWEAVE — demo jedra v brskalniku <small>(fw-pattern + fw-nest, wasm32, brez odvisnosti)</small></h1>
+<p class="warn">Mere → parametrična bloka (pletena majica + krilo z zvezkom) → operacijsko-zavedni šivni dodatki →
+razrez na rolo (v0 shelf, <em>placeholder kakovost — utilizacija NI reprezentativna</em>) → true-shape verifikacija.
+Krilo v demu izpelje boke iz pasu (poenostavitev). Vse se računa lokalno v WebAssembly.</p>
+
+<div class="cols">
+  <fieldset>
+    <legend>Mere (mm)</legend>
+    <div id="controls"></div>
+    <div class="stat" id="stats"></div>
+    <div class="stat" id="docstat" title="Vsak premik drsnika mere je en op-log dogodek; hash je kanonični FNV-1a stanja dokumenta (fw-doc)."></div>
+    <button id="dl-dxf" style="margin-top:.4rem">Prenesi DXF (iz dokumenta)</button>
+  </fieldset>
+  <div>
+    <h3>Cel garment <small style="font-weight:normal;opacity:.7">(sprednji + zadnji del + rokav + krilo; oranžne pike = balance zareze)</small></h3>
+    <svg id="panels" width="560" height="420" aria-label="kroji celega garmenta"></svg>
+    <div class="stat" id="specstat" title="Končne mere oblačila, izmerjene iz krojev (tech pack); pletenina ima negativni razteg, zato so prsi manjše od telesnih."></div>
+  </div>
+  <div>
+    <h3>Marker (rola)</h3>
+    <svg id="marker" width="330" height="420" aria-label="marker"></svg>
+  </div>
+  <div>
+    <h3>Oblačilo na telesu — v živo <small style="font-weight:normal;opacity:.7">(fw-sim + fw-avatar, wasm)</small></h3>
+    <p style="margin:.2rem 0 .5rem;color:#888;font-size:.85rem"><b>CEL sešit garment</b> (sprednji + zadnji del + oba rokava, 8 šivov z vzitjem &mdash; oranžne črte) se v realnem času drapira na <b>anatomskem avatarju iz mer</b> (trup + glava + roki + nogi): spremenite mere ali pletivo &mdash; kroji se preračunajo, oblečejo na telo in usedejo. Temna mreža = sprednje blago, svetla = zadnje. Vse računa lokalno v brskalniku. <a href="dressed-drape.html">Statični posnetek &rarr;</a></p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+      <canvas id="sim" width="360" height="430" style="background:#8881;border-radius:8px"></canvas>
+      <canvas id="sim3d" width="360" height="430" style="background:#20242c;border-radius:8px"></canvas>
+    </div>
+    <div class="stat" id="simstat"></div>
+    <p style="margin:.2rem 0 0;color:#999;font-size:.78rem">Levo: 2D pogled od spredaj. Desno: <b>3D pogled</b> (isti sim, osvetljena telesna mreža iz istih kolliderjev kot fizika; počasi se vrti).</p>
+  </div>
+  <div>
+    <h3>Izpeljani blok <small style="font-weight:normal;opacity:.7">(3D telo → šivni rez → razgrnitev; fw-geom + fw-avatar)</small></h3>
+    <svg id="derived" width="330" height="360" aria-label="izpeljani blok"></svg>
+    <label><span>presek širina/globina</span><input id="aspect" type="range" min="100" max="180" value="135" step="1"><output id="aspectout">1.35</output></label>
+    <div class="stat" id="derivedstat"></div>
+    <div class="stat" id="addrstat" title="Vsebinski naslov razgrnjene geometrije (fw_doc::artifact_hash). Isti vhodi → isti naslov; vsaka sprememba → drugačen."></div>
+    <button id="pin-addr" style="margin-top:.3rem">Pripni naslov</button>
+    <span class="stat" id="pinstat"></span>
+    <p class="warn">Obroči so obodno natančni na mero; popačenje razgrnitve
+    (Gaussova ukrivljenost) je izmerjeno in prikazano, ne skrito. PoC — brez
+    komodnosti.</p>
+  </div>
+  <fieldset class="cop">
+    <legend>Plan razreza — COP (naročilo po velikostih)</legend>
+    <div id="cop-controls"></div>
+    <table id="cop-table" aria-label="markerji"></table>
+    <div class="stat" id="copstat"></div>
+    <div class="stat" id="sizeaddr" title="Vsebinski naslov velikostne tabele (op-log dokumenti, fw-pattern::grading). Enak kot ga zapiše CLI — dokaz native⇄wasm determinizma."></div>
+    <p class="warn">Deterministični v0 (floor-greedy, max 25 slojev, 6 kosov/marker): dokazano brez
+    prekomerne proizvodnje; dolžine markerjev meri dejanski nest klic.</p>
+  </fieldset>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
