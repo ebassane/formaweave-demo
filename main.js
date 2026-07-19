@@ -82,6 +82,33 @@ state.fabric = -1; // -1 = razred z drsnika
   controls.append(row);
 }
 
+// ---- Barva obleke (B4): material obarva garment v 2D in 3D ----------------
+// Predstavitveni toni po vrstnem redu baze (jersey, interlock, rebrasto,
+// ponte, terry, flis, poplin, chambray, keper, lan); razredna paleta, ko
+// materiala ne vodi baza. Fizika se ne spremeni — barva je jezik izbire.
+const FABRIC_COLORS = [
+  "#4a7fb5", "#56708f", "#2e8577", "#7d4a8f", "#6f7d3f",
+  "#a05c3b", "#7fa8cc", "#4f6d99", "#31456e", "#a08a5f",
+];
+const CLASS_COLORS = ["#6b4f9e", "#35507e", "#2e8577"];
+function garmentColor() {
+  if (state.fabric >= 0 && FABRIC_COLORS[state.fabric]) {
+    return FABRIC_COLORS[state.fabric];
+  }
+  return CLASS_COLORS[state.stretch] || "#35507e";
+}
+function hexRgb(hex) {
+  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+}
+function lighten(hex, t = 0.55) {
+  const [r, g, b] = hexRgb(hex);
+  const mix = (v) =>
+    Math.round((v + (0.87 - v) * t) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(r)}${mix(g)}${mix(b)}`;
+}
+
 // ---- Dokument resnice: drsniki mer so op-log dogodki ----------------------
 const DOC_IDX = { chest: 0, waist: 1, torso: 2, shoulder: 3, neck: 4, armhole: 5 };
 
@@ -425,12 +452,48 @@ function init3d() {
   g3.garm.ns = simSeams.length;
 }
 
+// Rotacija s prstom/miško (B4): vlečenje po 3D kanvasu nastavi kot; ~3 s
+// miru vrne počasno samodejno vrtenje. Pointer events pokrijejo tudi dotik
+// (telefonski demo); touch-action:none prepreči, da bi vlečenje drselo stran.
+let yaw3d = 0;
+let last3dT = 0;
+let dragUntil = 0;
+let dragging3d = false;
+let dragX3d = 0;
+{
+  const c3d = document.getElementById("sim3d");
+  if (c3d) {
+    c3d.style.touchAction = "none";
+    c3d.style.cursor = "grab";
+    c3d.addEventListener("pointerdown", (e) => {
+      dragging3d = true;
+      dragX3d = e.clientX;
+      dragUntil = performance.now() + 3000;
+      c3d.setPointerCapture(e.pointerId);
+    });
+    c3d.addEventListener("pointermove", (e) => {
+      if (!dragging3d) return;
+      yaw3d += (e.clientX - dragX3d) * 0.012;
+      dragX3d = e.clientX;
+      dragUntil = performance.now() + 3000;
+    });
+    const done = () => {
+      dragging3d = false;
+    };
+    c3d.addEventListener("pointerup", done);
+    c3d.addEventListener("pointercancel", done);
+  }
+}
+
 function draw3d(tSec) {
   if (!gl || !g3) return;
+  const dt = Math.max(0, Math.min(tSec - last3dT, 0.1));
+  last3dT = tSec;
+  if (!dragging3d && performance.now() > dragUntil) yaw3d += 0.5 * dt;
   gl.viewport(0, 0, 360, 430);
   gl.clearColor(0.125, 0.141, 0.172, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  const model = matRotY(tSec * 0.5);
+  const model = matRotY(yaw3d);
   const view = matTranslate(0, -30, -2500);
   const proj = matPerspective((42 * Math.PI) / 180, 360 / 430, 100, 6000);
   const mv = matMul(view, matMul(model, matTranslate(0, -60, 0)));
@@ -456,7 +519,8 @@ function draw3d(tSec) {
   gl.disableVertexAttribArray(g3.loc.nor);
   gl.vertexAttrib3f(g3.loc.nor, 0, 0, 1);
   gl.uniform1f(g3.loc.lit, 0.0);
-  gl.uniform3f(g3.loc.color, 0.28, 0.4, 0.62);
+  const [gr, gg, gb] = hexRgb(garmentColor());
+  gl.uniform3f(g3.loc.color, gr, gg, gb);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g3.garm.eibo);
   gl.drawElements(gl.LINES, g3.garm.ne, gl.UNSIGNED_SHORT, 0);
   gl.uniform3f(g3.loc.color, 0.9, 0.55, 0.2);
@@ -528,8 +592,9 @@ function drawSim() {
   const Y = (k) => mapY(pos[3 * k + 1]);
   const Z = (k) => pos[3 * k + 2];
   ctx.lineWidth = 1.1;
+  const front3 = garmentColor();
   for (const pass of [0, 1]) {
-    ctx.strokeStyle = pass === 0 ? "#a9b7d6" : "#35507e";
+    ctx.strokeStyle = pass === 0 ? lighten(front3) : front3;
     ctx.beginPath();
     for (let e = 0; e + 1 < simEdges.length; e += 2) {
       const a = simEdges[e];
@@ -558,8 +623,16 @@ function tick() {
     frame++;
     drawSim();
     draw3d(frame / 60);
-    if (frame % 30 === 0)
-      simstat.textContent = `sim: OK · cel garment, ${ex.sim_dims()} vozlov · sličica ${frame}`;
+    if (frame % 30 === 0) {
+      // Živa FIT statistika (B4): isti pošteni razrez metrike kot mejnik
+      // test — nateg BLAGA (vzitveni šivi merjeni posebej kot reža).
+      let fit = "";
+      if (ex.sim_stats && ex.sim_stats() === 8) {
+        const st = readF32(8);
+        fit = ` · nateg blaga ${st[0].toFixed(2)} · šivna reža ${st[1].toFixed(1)} mm`;
+      }
+      simstat.textContent = `sim: OK · cel garment, ${ex.sim_dims()} vozlov · sličica ${frame}${fit}`;
+    }
   }
   requestAnimationFrame(tick);
 }
